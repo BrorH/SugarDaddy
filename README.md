@@ -1,4 +1,4 @@
 ## SUGARDADDY
-# A light-weight, non intrusive Ubuntu blood sugar display
+# A light-weight  Ubuntu blood sugar display
 
 WIP
