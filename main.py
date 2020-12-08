@@ -183,7 +183,7 @@ class Indicator():
 		# Udpate Delta label
 		try:
 			delta = str(resp["delta_mmol"]).replace("-","−")
-			if not delta.startswith("-"):
+			if not delta.startswith("−"):
 				delta = " +" + delta
 		except Exception as e:
 			delta = " −−"
