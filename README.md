@@ -1,4 +1,7 @@
 ## SUGARDADDY
 # A light-weight  Ubuntu blood sugar display
 
-WIP
+# Requirements:
+- python3
+- ubuntu (ver. unclear)
+- pymongo, dnspython
