@@ -1,240 +1,270 @@
 #!/usr/bin/env python3 -W ignore::DeprecationWarning
-import signal, gi, os, json, requests, subprocess
-gi.require_version('Gtk', '3.0')
-gi.require_version('AppIndicator3', '0.1')
-from gi.repository import Gtk, AppIndicator3, GObject,GdkPixbuf, GLib
-from threading import Thread
+import configparser
+import threading
+import requests
+import time
+import os
+import json
 from datetime import datetime, timedelta
 import numpy as np
-from time import sleep
-from graph import Graph
 
-#todo:
-# add "fetch now"-button
-# add timer to next fetch
-# add color to text
-# add alarm at (very) high levels
-# make next update happen 5 minutes after last data 
-# compatible timezone automatically
-# make get_month_start_time_from_datfile function use regex
-dt_timezone = 1 # how many hours ahead your timezone is of GMT
+import gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('AppIndicator3', '0.1')
+from gi.repository import AppIndicator3, Gtk
 
 
-class Data:
-	def __init__(self, indicator, val=None, time=None):
-		self.IC = indicator
-		self.val = val 
-		self.time = time
-		
-	
-	def __eq__(self, other):
-		try:
-			if self.val == other.val:
-				if np.abs((self.time - other.time).seconds) < 10:
-					return True 
-		except:
-			return False
-		return False
-	
-	def extract(self, **kwargs):
-		# kwargs must contain "idx" or "time"
-		# if "idx" is passed, the data stored -idx up the data list is retrieved
-		# if "time" is passed, the value at the closest time (within 1 minute) is returned
-		logpath = self.IC.logpath
-		with open(logpath, "r+") as file:
-			lines = file.readlines()
-		
-		if "idx" in kwargs.keys():
-			idx = int(kwargs["idx"])
-			try:
-				dat = lines[-idx].split(" ")
-				month_start = self.IC.get_month_start_time_from_datfile(logpath)
-				time = month_start + timedelta(seconds = int(dat[0]),hours=dt_timezone)
-				self.time = time
-				self.val = float(dat[-1])
-				return self
-				
-			except IndexError:
-				self.time = datetime.utcfromtimestamp(0)
-				self.val = 0
-				return False
-		else:
-			return False
 
+utcOffset = time.localtime().tm_gmtoff
+currpath = os.path.dirname(os.path.realpath(__file__))
+
+
+class Datapoint:
+    # converts from a json data format from nightscout format to a class instance. This makes it MUCH easier to work with the data
+    bsFormat = "mmol/L"
+    oldThreshold = 15  # minutes. How old the reading can be before it is categorized as "old". 
+    arrowToUnicode = {"Flat": "🢂"}  # 🠨 🠪 🠩 🠫 ⭦ ⭧ ⭨ ⭩ 🢀 🢂 🢁 🢃 🢄 🢅 🢆 🢇
+
+    def __init__(self, data):
+        # assumes data is dict from json
+        self.time = datetime.fromtimestamp(data["date"]//1000)
+        self.direction = data["direction"]
+        self.bs = float(data["sgv"])
+
+        # handle different bs value units
+        try:
+            self.delta = float(data["delta"])
+        except KeyError:
+            self.delta = 0
+
+        if self.bsFormat == "mmol/L":
+            self.bs = round(self.bs/18, 1)
+            self.delta = round(self.delta/18, 1)
+        else:
+            self.delta = int(self.delta)
+
+    def __str__(self):
+        deltaPrefix = ""
+        if self.delta >= 0:
+            deltaPrefix = "+"
+        try:
+            return f"{self.bs} {self.bsFormat} {deltaPrefix}{self.delta} {self.arrowToUnicode[self.direction]}"
+        except KeyError:
+            return f"{self.bs} {self.bsFormat} {deltaPrefix}{self.delta} {self.direction}"
+
+    def __eq__(self, other):
+        return self.time == other.time
+
+
+class Graph:
+    width = 70
+    columnHeight = 35
+    maxBS = 10 
+    minBS = 1 
+
+    def __init__(self, data):
+        self.data = np.array(data)
+
+    def __setitem__(self, idx, val):
+        self.data[idx] = val
+
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+    def __str__(self):
+        # generates the layered string which displays the BS graph
+
+        # WIP
+        res = "¹º"
+        i = 0
+        for j in range(self.width):
+            val = self.data[i].bs
+            #timestamp = self.data[i].time 
+
+            #earliest_time = datetime.now()+timedelta(minutes=5*(-self.width+j))
+            #latest_time = earliest_time + timedelta(minutes=6)
+            #print(f"\n{j}: {earliest_time.strftime(r'%H:%M:%S')}. {i}: {timestamp.strftime(r'%H:%M:%S')} ",end ="")
+            # print(timestamp, earliest_time, latest_time)
+
+            column = [u"\u0323"]*self.columnHeight
+            # Finds the corresponding column index of the data value.
+            # But only if the measurement time, timestamp, was within the 
+            # corresponding time window which the graph point corresponds to
+            if True:#earliest_time <= timestamp <= latest_time:
+                i += 1
+                if self.minBS <= val <= self.maxBS:
+                    idx = int(round((val-self.minBS) *
+                                    self.columnHeight/(self.maxBS-self.minBS)))
+                    column[idx] = u"\u033B"
+            res += "".join(column[::-1]) + u"\u2005"
+        return res
+
+
+class DataCollector:
+    threads = []
+    yourSite = ""
+
+    def __init__(self):
+        # on boot, gather enough data to backfill log
+        onBootURL = self.url_request_constructor(
+            count=Graph.width, dt=5*(Graph.width + 5))
+        self.onBootData = self.fetch_data(onBootURL)
+
+        self.data = self.onBootData[::-1]
+
+        collectorThread = threading.Thread(target=self.run_collector)
+        graphThread = threading.Thread(target=self.start_graph)
+        self.threads = [collectorThread, graphThread]
+        for t in self.threads:
+            t.start()
+
+    def start_graph(self):
+        self.graph = Graph(self.data)
+
+        self.menu = Indicator(self.graph)
+        self.menu.update_label(str(self.data[-1]))
+        self.menu.update_icon(self.data[-1])
+        self.menu.update_last_updated(self.data[-1])
+        Gtk.main()
+
+    def fetch_data(self, url):
+        # fetches all data from the passed url and takes care of error handling.
+        request_results = json.loads(requests.get(url).text)
+        res = []
+        for val in request_results:
+            res.append(Datapoint(val))
+        return res
+
+    def purge_old_data(self):
+        # checks the list of datapoints and purges old values (data that is outside of graph width)
+        # we keep values that are 5 minutes too old to be displayed, just for safety in case something messes up
+        now = datetime.now()
+        for data in self.data:
+            if (now - data.time).seconds > 5*60*(Graph.width+1):
+                print(f"deleted {data}, {data.time}")
+                del data
+
+    def url_request_constructor(self, count=1, dt=6):
+        # constructs the url which appropriately sends a request to the api for a datapoint within a given time window, dt
+        # the time window is dt in minutes
+        now = datetime.now() - timedelta(seconds=utcOffset)
+
+        nowStr = now.strftime(r"%Y-%m-%dT%H:%M:%S")
+        thenStr = (now-timedelta(minutes=dt)).strftime(r"%Y-%m-%dT%H:%M:%S")
+        res = rf"https://{self.yourSite}/api/v1/entries.json?count={count}&find[dateString][$gte]={thenStr}&find[dateString][$lte]={nowStr}"
+        return res
+
+    def run_collector(self):
+        while True:
+            time.sleep(10)  # sleep between each api request
+            self.purge_old_data()
+            url = self.url_request_constructor()
+            data = self.fetch_data(url)
+
+            if data:
+                data = data[0]
+                if data != self.data[-1]:
+                    # make sure the data found is not just the same value as the previous data point
+                    self.data.append(data)
+                    
+            else:
+                # this gets called if the request did not retrieve any data point in the requested time window
+                # aka, there have been no new data updates in the time window
+                pass
+            self.menu.update_icon(self.data[-1])
+            self.menu.update_label(str(self.data[-1]))
+            self.menu.update_last_updated(self.data[-1])
+            self.menu.update_graph()
 
 
 class Indicator():
-	base_path = os.path.dirname(os.path.abspath(__file__))
-	def __init__(self):
-		self.app = 'BrorBS'
-		
-		self.last_update = "−−  "
-		self.delta = "−−"
-		self.last_update_menu = None
-		self.delta_menu = None
-		self.base_path = os.path.dirname(os.path.realpath(__file__))
-		self.indicator = AppIndicator3.Indicator.new(self.app, "...",AppIndicator3.IndicatorCategory.OTHER)
-		self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)	   
-		self.indicator.set_menu(self.create_menu())
-		self.indicator.set_label("booting ...", self.app)
+    def __init__(self, graph):
 
-		self.update()
-		GLib.timeout_add_seconds(5, self.update)
+        self.graph = graph
+        self.app = 'SugarDaddy.app'
+        iconpath = currpath+"/media/yellow.png"
 
+        self.indicator = AppIndicator3.Indicator.new(self.app, iconpath,AppIndicator3.IndicatorCategory.OTHER)
 
+        self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+        self.indicator.set_menu(self.create_menu())
+        self.indicator.set_label("booting ...", self.app)
 
-	def update(self):
-		self.update_bs()
-		self.graph.update()
+    def update_graph(self):
+        self.item_graph.set_label(str(self.graph))
 
-		return True
+    def update_label(self, string):
+        self.indicator.set_label(string, self.app)
 
+    def update_icon(self, data):
+        # sets the appropriate icon for the passed data point
+        now = datetime.now()
+        filename = ""
+        dataPointAge = (now-data.time).seconds/60
+        if dataPointAge > Datapoint.oldThreshold:
+            filename += "X"
+        if data.bs >= HIGH:
+            filename += "yellow.png"
+        elif HIGH > data.bs > LOW:
+            filename += "green.png"
+        else:
+            filename += "red.png"
 
-	def create_menu(self):
-		menu = Gtk.Menu()
-		
-		last_update_item= Gtk.MenuItem(label=f'Last update: {self.last_update}')
-		self.last_update_menu = last_update_item
-		menu.append(last_update_item)
+        self.indicator.set_icon(currpath+f"/media/{filename}")
 
-		delta_item= Gtk.MenuItem(label=f'Delta: {self.delta}')
-		self.delta_menu = delta_item
-		menu.append(delta_item)
-	
-		self.graph = Graph(self,72,40)
-		
-		
-		graph_menu_item = Gtk.MenuItem(label=str(self.graph))
-		self.graph_menu_item = graph_menu_item
-		menu.append(self.graph_menu_item)
-		
-		for num in ["⁸", "⁶",  "²"]:
-			foo_menu_item = Gtk.MenuItem(label=num)
-			menu.append(foo_menu_item)
-	
+    def update_last_updated(self, data):
+        time_of_update = data.time.strftime(r"%H:%M:%S")
+        time_delta = int(round((datetime.now()-data.time).seconds/60))
+        min_suffix = ""
+        if time_delta > 1 or time_delta == 0:
+            min_suffix = "s"
+        self.item_last_update.set_label(
+            f"Last update: {time_of_update}, {time_delta} minute{min_suffix} ago")
 
-		menu.show_all()
-		return menu
-	
-	@property
-	def logpath(self):
-		now = datetime.now()
-		try:
-			logpath = f"{self.base_path}/logs/{now.year}/{now.month}.dat"
-			assert os.path.exists(logpath) # to raise evt. error
-			return logpath
-		except AssertionError:
-			if not os.path.exists(self.base_path +f"/logs/{now.year}"):
-				subprocess.run(["mkdir", f"{self.base_path}/logs/{now.year}"])
-			if not os.path.exists(self.base_path +f"/logs/{now.year}/{now.month}.dat"):
-				subprocess.run(["touch", f"{self.base_path}/logs/{now.year}/{now.month}.dat"])
-			return self.logpath
-		
-	@property
-	def prev_val(self):
-		#returns previous stored bs val
-		with open(self.logpath, "r+") as file:
-			lines = file.readlines()
-		try:
-			lastval = lines[-1].split(" ")
-			lasttime = datetime.strptime(lastval[0], r"%H:%M:%S")
-			lasttime = datetime.now().replace(hour=lasttime.hour, minute=lasttime.minute, second=lasttime.second, microsecond=0)
-			return lasttime, float(lastval[-1])
-		except IndexError:
-			return None
+    def create_menu(self):
+        menu = Gtk.Menu()
 
-	def get_month_start_time_from_datfile(self, datfile):
-		# returns the EPOCH time of the start of the month for datafile
-		stripped = datfile[:datfile.rindex(".dat")]
-		month = int(stripped[stripped.rindex("/")+1:])
-		stripped = stripped[:stripped.rindex("/")]
-		year = int(stripped[-4:])
-		month_start_time = datetime.strptime(f"{year}:{month}", r"%Y:%m")
-		return month_start_time
+        # create the graph bar
+        self.item_graph = Gtk.MenuItem(label=str(self.graph))
+        menu.append(self.item_graph)
 
-	def log_write(self, msg, time):
-		# write to log
-		epoch = datetime.utcfromtimestamp(0)
-		month_start = datetime.now().replace(day=1, hour = 0,minute=0, second=0, microsecond=0)
-		month_start_seconds = int(round((month_start-epoch).total_seconds()))
-		sec_since_month_start = time -month_start_seconds
-		with open(self.logpath, "a+") as file:
-			file.write(f"{sec_since_month_start} {msg}\n")
+        # create a couple empty dummy bars
+        for i in range(3):
+            menu.append(Gtk.MenuItem(label=""))
 
-		
+        self.item_last_update = Gtk.MenuItem(label="Last update:")
+        menu.append(self.item_last_update)
+        menu.show_all()
+        return menu
+
+    def green(self, source):
+        self.indicator.set_icon(currpath+"/media/green.png")
+
+    def purple(self, source):
+        self.indicator.set_icon(currpath+"/media/red.png")
 
 
-	def update_bs(self):
-		# checks json file for when last data was read from transmitter and creates a timed schedule accordingly
-		try:
-			response = requests.get("https://sugarmate.io/api/v1/qajqju/latest.json")
-			resp = json.loads(response.text)
-		except:
-			return
-		
-		timestamp = resp["timestamp"]
-		timestamp = datetime.strptime(timestamp[:timestamp.rindex(".")], r"%Y-%m-%dT%H:%M:%S")
-		timestamp = timestamp + timedelta(hours = dt_timezone)
-		x = resp["x"]
-		reading = resp["reading"]
-		bsval = resp["mmol"]
-		trend_symbol = str(resp["trend_symbol"])
+def setup_config():
+    global HIGH, LOW
+    configParser = configparser.RawConfigParser()
+    configFilePath = currpath + "/setup.conf"
+    configParser.read(configFilePath)
 
-		# Udpate Delta label
-		try:
-			delta = str(resp["delta_mmol"]).replace("-","−")
-			if not delta.startswith("−"):
-				delta = " +" + delta
-		except Exception as e:
-			delta = " −−"
-		self.delta_menu.set_label(f"Delta: {delta}")
-		sleep(0.01) #multithread needs time to update
+    HIGH = float(configParser.get('SugarDaddy-config', 'HIGH'))
+    LOW = float(configParser.get('SugarDaddy-config', 'LOW'))
+    Datapoint.bsFormat = configParser.get('SugarDaddy-config', 'UNITS')
+    DataCollector.yourSite = configParser.get('SugarDaddy-config', 'YOUR-SITE')
+    print(DataCollector.yourSite)
+    Datapoint.oldThreshold = float(configParser.get(
+        'SugarDaddy-config', 'OLD-THRESHOLD'))
+    Graph.maxBS = float(configParser.get('SugarDaddy-config', 'GRAPH-MAX'))
+    Graph.minBS = float(configParser.get('SugarDaddy-config', 'GRAPH-MIN'))
 
-		# Update "last update" label
-		self.last_update_menu.set_label(f"Last update:  {resp['time']}   ") 
 
-		bsstr = str(bsval)+" mmol/L " + trend_symbol  #blood sugar string to fill the main label
-		
-		read_data = Data(self, val=float(bsval), time=timestamp)
-		prev_stored_data = Data(self).extract(idx=1)
-		
-		if bsval >= 8:
-			icon = "orange.png"
-		elif 3.9<= bsval < 8:
-			icon = "green.png"
-		else:
-			icon = "red.png"
-
-		try:
-			if not (read_data == prev_stored_data):
-				self.log_write(bsval, x)
-		except AttributeError:
-			self.log_write(bsval, x)
-		
-		try:
-			dt = (datetime.now()-prev_stored_data.time).seconds
-		except AttributeError:
-			dt = 0
-		if reading.endswith("[OLD]") or dt >= 60*20:
-			icon = "X" + icon
-		
-		GLib.idle_add(self.indicator.set_label,bsstr, self.app,priority=GLib.PRIORITY_DEFAULT) #update top label
-		self.indicator.set_icon(self.base_path+"/media/"+icon)
-		del read_data, prev_stored_data #free memory
-
-		
-
-	
-
-	def ASCII_loader(self, boot=False):
-		self.loader_frames = ['▁','▃','▄','▅','▆','▇','█','▇','▆','▅','▄','▃',"▁", " "]		
-		return True
-	
-			
-
-	def stop(self, source):
-		Gtk.main_quit()
-
-Indicator()
-signal.signal(signal.SIGINT, signal.SIG_DFL)
-Gtk.main()
+if __name__ == "__main__":
+    setup_config()
+    try:
+        DataCollector()
+    except KeyboardInterrupt:
+        for t in DataCollector.threads:
+            t.join()
