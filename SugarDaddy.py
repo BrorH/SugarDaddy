@@ -254,7 +254,6 @@ def setup_config():
     LOW = float(configParser.get('SugarDaddy-config', 'LOW'))
     Datapoint.bsFormat = configParser.get('SugarDaddy-config', 'UNITS')
     DataCollector.yourSite = configParser.get('SugarDaddy-config', 'YOUR-SITE')
-    print(DataCollector.yourSite)
     Datapoint.oldThreshold = float(configParser.get(
         'SugarDaddy-config', 'OLD-THRESHOLD'))
     Graph.maxBS = float(configParser.get('SugarDaddy-config', 'GRAPH-MAX'))
