@@ -23,7 +23,7 @@ class Datapoint:
     # converts from a json data format from nightscout format to a class instance. This makes it MUCH easier to work with the data
     bsFormat = "mmol/L"
     oldThreshold = 15  # minutes. How old the reading can be before it is categorized as "old". 
-    arrowToUnicode = {"Flat": "🢂"}  # 🠨 🠪 🠩 🠫 ⭦ ⭧ ⭨ ⭩ 🢀 🢂 🢁 🢃 🢄 🢅 🢆 🢇
+    arrowToUnicode = {"Flat": "🢂", "FortyFiveDown": "🢆", "FortyFiveUp": "🢅"}  # 🠨 🠪 🠩 🠫 ⭦ ⭧ ⭨ ⭩ 🢀 🢂 🢁 🢃 🢄 🢅 🢆 🢇
 
     def __init__(self, data):
         # assumes data is dict from json
@@ -130,6 +130,8 @@ class DataCollector:
     def fetch_data(self, url):
         # fetches all data from the passed url and takes care of error handling.
         request_results = json.loads(requests.get(url).text)
+        
+
         res = []
         for val in request_results:
             res.append(Datapoint(val))
@@ -159,7 +161,12 @@ class DataCollector:
             time.sleep(10)  # sleep between each api request
             self.purge_old_data()
             url = self.url_request_constructor()
-            data = self.fetch_data(url)
+            try:
+                data_temp = self.fetch_data(url)
+                data = data_temp
+            except requests.exceptions.ConnectionError:
+                self.menu.set_error_icon()
+                continue
 
             if data:
                 data = data[0]
@@ -220,6 +227,15 @@ class Indicator():
             min_suffix = "s"
         self.item_last_update.set_label(
             f"Last update: {time_of_update}, {time_delta} minute{min_suffix} ago")
+
+    def set_error_icon(self):
+        icon = str(self.indicator.get_icon())
+        for colour in ["green.png", "yellow.png", "red.png"]:
+            if icon.endswith(colour):
+                self.indicator.set_icon(icon.rstrip(colour)+"X"+colour)
+                return 
+
+        # print(self.indicator.get_icon(), self.indicator.get_icon_desc())
 
     def create_menu(self):
         menu = Gtk.Menu()
