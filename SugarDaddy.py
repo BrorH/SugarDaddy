@@ -23,7 +23,7 @@ class Datapoint:
     # converts from a json data format from nightscout format to a class instance. This makes it MUCH easier to work with the data
     bsFormat = "mmol/L"
     oldThreshold = 15  # minutes. How old the reading can be before it is categorized as "old". 
-    arrowToUnicode = {"Flat": "🢂", "FortyFiveDown": "🢆", "FortyFiveUp": "🢅"}  # 🠨 🠪 🠩 🠫 ⭦ ⭧ ⭨ ⭩ 🢀 🢂 🢁 🢃 🢄 🢅 🢆 🢇
+    arrowToUnicode = {"Flat": "🢂", "FortyFiveDown": "🢆", "FortyFiveUp": "🢅", "SingleUp":"🢁", "SingleDown":"🢃", "NONE":"•"}  # 🠨 🠪 🠩 🠫 ⭦ ⭧ ⭨ ⭩ 🢀 🢂 🢁 🢃 🢄 🢅 🢆 🢇
 
     def __init__(self, data):
         # assumes data is dict from json
@@ -143,7 +143,7 @@ class DataCollector:
         now = datetime.now()
         for data in self.data:
             if (now - data.time).seconds > 5*60*(Graph.width+1):
-                print(f"deleted {data}, {data.time}")
+                #print(f"deleted {data}, {data.time}")
                 del data
 
     def url_request_constructor(self, count=1, dt=6):
