@@ -23,13 +23,21 @@ class Datapoint:
     # converts from a json data format from nightscout format to a class instance. This makes it MUCH easier to work with the data
     bsFormat = "mmol/L"
     oldThreshold = 15  # minutes. How old the reading can be before it is categorized as "old". 
-    arrowToUnicode = {"Flat": "🢂", "FortyFiveDown": "🢆", "FortyFiveUp": "🢅", "SingleUp":"🢁", "SingleDown":"🢃", "NONE":"•"}  # 🠨 🠪 🠩 🠫 ⭦ ⭧ ⭨ ⭩ 🢀 🢂 🢁 🢃 🢄 🢅 🢆 🢇
+    arrowToUnicode = {"Flat": "🢂", "FortyFiveDown": "🢆", "FortyFiveUp": "🢅", "SingleUp":"🢁", "SingleDown":"🢃", "DoubleUp":"🢁🢁", "DoubleDown":"🢃🢃", "NONE":"•"}  # 🠨 🠪 🠩 🠫 ⭦ ⭧ ⭨ ⭩ 🢀 🢂 🢁 🢃 🢄 🢅 🢆 🢇
 
     def __init__(self, data):
         # assumes data is dict from json
         self.time = datetime.fromtimestamp(data["date"]//1000)
-        self.direction = data["direction"]
-        self.bs = float(data["sgv"])
+        # print(data)
+        try:
+            self.direction = data["direction"]
+        except:
+            self.direction = "NONE"
+        
+        try:
+            self.bs = float(data["sgv"])
+        except:
+            self.bs = np.nan
 
         # handle different bs value units
         try:
@@ -56,62 +64,64 @@ class Datapoint:
         return self.time == other.time
 
 
-class Graph:
-    width = 70
-    columnHeight = 35
-    maxBS = 10 
-    minBS = 1 
+# class Graph:
+#     width = 70
+#     columnHeight = 35
+#     maxBS = 10 
+#     minBS = 1 
 
-    def __init__(self, data):
-        self.data = np.array(data)
+#     def __init__(self, data):
+#         self.data = np.array(data)
 
-    def __setitem__(self, idx, val):
-        self.data[idx] = val
+#     def __setitem__(self, idx, val):
+#         self.data[idx] = val
 
-    def __getitem__(self, idx):
-        return self.data[idx]
+#     def __getitem__(self, idx):
+#         return self.data[idx]
 
-    def __str__(self):
-        # generates the layered string which displays the BS graph
+#     def __str__(self):
+#         # generates the layered string which displays the BS graph
+#         return " "
+#         # WIP
+#         res = "¹º"
+#         i = 0
+#         for j in range(self.width):
+#             val = self.data[i].bs
+#             #timestamp = self.data[i].time 
 
-        # WIP
-        res = "¹º"
-        i = 0
-        for j in range(self.width):
-            val = self.data[i].bs
-            #timestamp = self.data[i].time 
+#             #earliest_time = datetime.now()+timedelta(minutes=5*(-self.width+j))
+#             #latest_time = earliest_time + timedelta(minutes=6)
+#             #print(f"\n{j}: {earliest_time.strftime(r'%H:%M:%S')}. {i}: {timestamp.strftime(r'%H:%M:%S')} ",end ="")
+#             # print(timestamp, earliest_time, latest_time)
 
-            #earliest_time = datetime.now()+timedelta(minutes=5*(-self.width+j))
-            #latest_time = earliest_time + timedelta(minutes=6)
-            #print(f"\n{j}: {earliest_time.strftime(r'%H:%M:%S')}. {i}: {timestamp.strftime(r'%H:%M:%S')} ",end ="")
-            # print(timestamp, earliest_time, latest_time)
-
-            column = [u"\u0323"]*self.columnHeight
-            # Finds the corresponding column index of the data value.
-            # But only if the measurement time, timestamp, was within the 
-            # corresponding time window which the graph point corresponds to
-            if True:#earliest_time <= timestamp <= latest_time:
-                i += 1
-                if self.minBS <= val <= self.maxBS:
-                    idx = int(round((val-self.minBS) *
-                                    self.columnHeight/(self.maxBS-self.minBS)))
-                    column[idx] = u"\u033B"
-            res += "".join(column[::-1]) + u"\u2005"
-        return res
+#             column = [u"\u0323"]*self.columnHeight
+#             # Finds the corresponding column index of the data value.
+#             # But only if the measurement time, timestamp, was within the 
+#             # corresponding time window which the graph point corresponds to
+#             if True:#earliest_time <= timestamp <= latest_time:
+#                 i += 1
+#                 if self.minBS <= val <= self.maxBS:
+#                     idx = int(round((val-self.minBS) *
+#                                     self.columnHeight/(self.maxBS-self.minBS)))
+#                     column[idx] = u"\u033B"
+#             res += "".join(column[::-1]) + u"\u2005"
+#         return res
 
 
 class DataCollector:
     threads = []
     yourSite = ""
+    url = ""
 
     def __init__(self):
         # on boot, gather enough data to backfill log
-        onBootURL = self.url_request_constructor(
-            count=Graph.width, dt=5*(Graph.width + 5))
-        self.onBootData = self.fetch_data(onBootURL)
+        # onBootURL = self.url_request_constructor(
+        #     # count=Graph.width, 
+        #     dt=10)
+        self.onBootData = self.fetch_data(self.url)
 
         self.data = self.onBootData[::-1]
-
+        # self.run_collector()
         collectorThread = threading.Thread(target=self.run_collector)
         graphThread = threading.Thread(target=self.start_graph)
         self.threads = [collectorThread, graphThread]
@@ -119,9 +129,9 @@ class DataCollector:
             t.start()
 
     def start_graph(self):
-        self.graph = Graph(self.data)
+        # self.graph = Graph(self.data)
 
-        self.menu = Indicator(self.graph)
+        self.menu = Indicator()#self.graph)
         self.menu.update_label(str(self.data[-1]))
         self.menu.update_icon(self.data[-1])
         self.menu.update_last_updated(self.data[-1])
@@ -142,27 +152,29 @@ class DataCollector:
         # we keep values that are 5 minutes too old to be displayed, just for safety in case something messes up
         now = datetime.now()
         for data in self.data:
-            if (now - data.time).seconds > 5*60*(Graph.width+1):
+            if (now - data.time).seconds > 15:#5*60*(Graph.width+1):
                 #print(f"deleted {data}, {data.time}")
                 del data
 
-    def url_request_constructor(self, count=1, dt=6):
-        # constructs the url which appropriately sends a request to the api for a datapoint within a given time window, dt
-        # the time window is dt in minutes
-        now = datetime.now() - timedelta(seconds=utcOffset)
+    # def url_request_constructor(self, count=1, dt=6):
+    #     return rf"https://{self.yourSite}/api/v1/entries.json?count={count}"
+    #     # constructs the url which appropriately sends a request to the api for a datapoint within a given time window, dt
+    #     # the time window is dt in minutes
+    #     now = datetime.now() - timedelta(seconds=utcOffset)
 
-        nowStr = now.strftime(r"%Y-%m-%dT%H:%M:%S")
-        thenStr = (now-timedelta(minutes=dt)).strftime(r"%Y-%m-%dT%H:%M:%S")
-        res = rf"https://{self.yourSite}/api/v1/entries.json?count={count}&find[dateString][$gte]={thenStr}&find[dateString][$lte]={nowStr}"
-        return res
+    #     nowStr = now.strftime(r"%Y-%m-%dT%H:%M:%S")
+    #     thenStr = (now-timedelta(minutes=dt)).strftime(r"%Y-%m-%dT%H:%M:%S")
+    #     res = rf"https://{self.yourSite}/api/v1/entries.json?count={count}&find[dateString][$gte]={thenStr}&find[dateString][$lte]={nowStr}"
+    #     print(res)
+    #     return res
 
     def run_collector(self):
         while True:
             time.sleep(10)  # sleep between each api request
             self.purge_old_data()
-            url = self.url_request_constructor()
+            # url = self.url_request_constructor()
             try:
-                data_temp = self.fetch_data(url)
+                data_temp = self.fetch_data(self.url)
                 data = data_temp
             except requests.exceptions.ConnectionError:
                 self.menu.set_error_icon()
@@ -181,13 +193,13 @@ class DataCollector:
             self.menu.update_icon(self.data[-1])
             self.menu.update_label(str(self.data[-1]))
             self.menu.update_last_updated(self.data[-1])
-            self.menu.update_graph()
+            #self.menu.update_graph()
 
 
 class Indicator():
-    def __init__(self, graph):
+    def __init__(self, graph=None):
 
-        self.graph = graph
+        #self.graph = graph
         self.app = 'SugarDaddy.app'
         iconpath = currpath+"/media/yellow.png"
 
@@ -197,8 +209,8 @@ class Indicator():
         self.indicator.set_menu(self.create_menu())
         self.indicator.set_label("booting ...", self.app)
 
-    def update_graph(self):
-        self.item_graph.set_label(str(self.graph))
+    # def update_graph(self):
+    #     self.item_graph.set_label(str(self.graph))
 
     def update_label(self, string):
         self.indicator.set_label(string, self.app)
@@ -241,12 +253,12 @@ class Indicator():
         menu = Gtk.Menu()
 
         # create the graph bar
-        self.item_graph = Gtk.MenuItem(label=str(self.graph))
-        menu.append(self.item_graph)
+        #self.item_graph = Gtk.MenuItem(label=str(self.graph))
+        #menu.append(self.item_graph)
 
         # create a couple empty dummy bars
-        for i in range(3):
-            menu.append(Gtk.MenuItem(label=""))
+        # for i in range(3):
+        #     menu.append(Gtk.MenuItem(label=""))
 
         self.item_last_update = Gtk.MenuItem(label="Last update:")
         menu.append(self.item_last_update)
@@ -269,11 +281,11 @@ def setup_config():
     HIGH = float(configParser.get('SugarDaddy-config', 'HIGH'))
     LOW = float(configParser.get('SugarDaddy-config', 'LOW'))
     Datapoint.bsFormat = configParser.get('SugarDaddy-config', 'UNITS')
-    DataCollector.yourSite = configParser.get('SugarDaddy-config', 'YOUR-SITE')
+    DataCollector.url = f"https://{configParser.get('SugarDaddy-config', 'YOUR-SITE')}/api/v1/entries.json?count=1"
     Datapoint.oldThreshold = float(configParser.get(
         'SugarDaddy-config', 'OLD-THRESHOLD'))
-    Graph.maxBS = float(configParser.get('SugarDaddy-config', 'GRAPH-MAX'))
-    Graph.minBS = float(configParser.get('SugarDaddy-config', 'GRAPH-MIN'))
+    #Graph.maxBS = float(configParser.get('SugarDaddy-config', 'GRAPH-MAX'))
+    #Graph.minBS = float(configParser.get('SugarDaddy-config', 'GRAPH-MIN'))
 
 
 if __name__ == "__main__":
