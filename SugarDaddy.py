@@ -287,7 +287,6 @@ def setup_config():
     #Graph.maxBS = float(configParser.get('SugarDaddy-config', 'GRAPH-MAX'))
     #Graph.minBS = float(configParser.get('SugarDaddy-config', 'GRAPH-MIN'))
 
-
 if __name__ == "__main__":
     setup_config()
     try:
