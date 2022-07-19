@@ -53,7 +53,11 @@ class Datapoint:
 
     def __str__(self):
         deltaPrefix = ""
+        
         if self.delta >= 0:
+            if str(self.delta).startswith("-"):
+                # python quirk allows -0.0 >= 0
+                self.delta = np.abs(self.delta)
             deltaPrefix = "+"
         try:
             return f"{self.bs} {self.bsFormat} {deltaPrefix}{self.delta} {self.arrowToUnicode[self.direction]}"
