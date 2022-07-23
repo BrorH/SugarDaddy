@@ -133,7 +133,7 @@ class DataCollector:
             t.start()
 
     def start_graph(self):
-        # self.graph = Graph(self.data)
+        # self.graph = Graph(self.data) #graph is disabled for now
 
         self.menu = Indicator()#self.graph)
         self.menu.update_label(str(self.data[-1]))
