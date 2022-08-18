@@ -111,7 +111,6 @@ class Datapoint:
 #             res += "".join(column[::-1]) + u"\u2005"
 #         return res
 
-
 class DataCollector:
     threads = []
     yourSite = ""
