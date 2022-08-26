@@ -219,7 +219,7 @@ class Indicator():
         self.indicator.set_label(string, self.app)
 
     def update_icon(self, data):
-        # sets the appropriate icon for the passed data point
+        # sets the appropriate icon for the given data point
         now = datetime.now()
         filename = ""
         dataPointAge = (now-data.time).seconds/60
