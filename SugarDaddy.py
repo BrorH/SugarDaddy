@@ -5,14 +5,13 @@ import requests
 import time
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 import numpy as np
 
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('AppIndicator3', '0.1')
 from gi.repository import AppIndicator3, Gtk
-
 
 
 utcOffset = time.localtime().tm_gmtoff
@@ -45,7 +44,7 @@ class Datapoint:
         except KeyError:
             self.delta = 0
 
-        if self.bsFormat == "mmol/L":
+        if self.bsFormat.strip(" ") in ["mmol/L", "mmol/l", "mmoll", "mmolL"]:
             self.bs = round(self.bs/18, 1)
             self.delta = round(self.delta/18, 1)
         else:
@@ -67,60 +66,12 @@ class Datapoint:
     def __eq__(self, other):
         return self.time == other.time
 
-
-# class Graph:
-#     width = 70
-#     columnHeight = 35
-#     maxBS = 10 
-#     minBS = 1 
-
-#     def __init__(self, data):
-#         self.data = np.array(data)
-
-#     def __setitem__(self, idx, val):
-#         self.data[idx] = val
-
-#     def __getitem__(self, idx):
-#         return self.data[idx]
-
-#     def __str__(self):
-#         # generates the layered string which displays the BS graph
-#         return " "
-#         # WIP
-#         res = "¹º"
-#         i = 0
-#         for j in range(self.width):
-#             val = self.data[i].bs
-#             #timestamp = self.data[i].time 
-
-#             #earliest_time = datetime.now()+timedelta(minutes=5*(-self.width+j))
-#             #latest_time = earliest_time + timedelta(minutes=6)
-#             #print(f"\n{j}: {earliest_time.strftime(r'%H:%M:%S')}. {i}: {timestamp.strftime(r'%H:%M:%S')} ",end ="")
-#             # print(timestamp, earliest_time, latest_time)
-
-#             column = [u"\u0323"]*self.columnHeight
-#             # Finds the corresponding column index of the data value.
-#             # But only if the measurement time, timestamp, was within the 
-#             # corresponding time window which the graph point corresponds to
-#             if True:#earliest_time <= timestamp <= latest_time:
-#                 i += 1
-#                 if self.minBS <= val <= self.maxBS:
-#                     idx = int(round((val-self.minBS) *
-#                                     self.columnHeight/(self.maxBS-self.minBS)))
-#                     column[idx] = u"\u033B"
-#             res += "".join(column[::-1]) + u"\u2005"
-#         return res
-
 class DataCollector:
     threads = []
     yourSite = ""
     url = ""
 
     def __init__(self):
-        # on boot, gather enough data to backfill log
-        # onBootURL = self.url_request_constructor(
-        #     # count=Graph.width, 
-        #     dt=10)
         self.onBootData = self.fetch_data(self.url)
 
         self.data = self.onBootData[::-1]
@@ -158,18 +109,6 @@ class DataCollector:
             if (now - data.time).seconds > 15:#5*60*(Graph.width+1):
                 #print(f"deleted {data}, {data.time}")
                 del data
-
-    # def url_request_constructor(self, count=1, dt=6):
-    #     return rf"https://{self.yourSite}/api/v1/entries.json?count={count}"
-    #     # constructs the url which appropriately sends a request to the api for a datapoint within a given time window, dt
-    #     # the time window is dt in minutes
-    #     now = datetime.now() - timedelta(seconds=utcOffset)
-
-    #     nowStr = now.strftime(r"%Y-%m-%dT%H:%M:%S")
-    #     thenStr = (now-timedelta(minutes=dt)).strftime(r"%Y-%m-%dT%H:%M:%S")
-    #     res = rf"https://{self.yourSite}/api/v1/entries.json?count={count}&find[dateString][$gte]={thenStr}&find[dateString][$lte]={nowStr}"
-    #     print(res)
-    #     return res
 
     def run_collector(self):
         while True:
@@ -255,14 +194,7 @@ class Indicator():
     def create_menu(self):
         menu = Gtk.Menu()
 
-        # create the graph bar
-        #self.item_graph = Gtk.MenuItem(label=str(self.graph))
-        #menu.append(self.item_graph)
-
-        # create a couple empty dummy bars
-        # for i in range(3):
-        #     menu.append(Gtk.MenuItem(label=""))
-
+       
         self.item_last_update = Gtk.MenuItem(label="Last update:")
         menu.append(self.item_last_update)
         menu.show_all()
@@ -287,9 +219,7 @@ def setup_config():
     DataCollector.url = f"https://{configParser.get('SugarDaddy-config', 'YOUR-SITE')}/api/v1/entries.json?count=1"
     Datapoint.oldThreshold = float(configParser.get(
         'SugarDaddy-config', 'OLD-THRESHOLD'))
-    #Graph.maxBS = float(configParser.get('SugarDaddy-config', 'GRAPH-MAX'))
-    #Graph.minBS = float(configParser.get('SugarDaddy-config', 'GRAPH-MIN'))
-
+   
 if __name__ == "__main__":
     setup_config()
     try:
