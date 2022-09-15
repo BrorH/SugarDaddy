@@ -1,6 +1,4 @@
 ## SUGARDADDY
- A light-weight Glucose display for Ubuntu.
-
  Indicates high/low values and missed readings and is always just a glance away! Does __not__ make any sound!
 
 Examples:
