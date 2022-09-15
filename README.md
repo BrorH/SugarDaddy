@@ -3,8 +3,11 @@
 
  Indicates high/low values and missed readings and is always just a glance away! Does __not__ make any sound!
 
+Examples:
 
-![Example image](/media/example.png)
+![Example](/media/example1.png) 
+
+![Example of low](/media/example2.png)
 # Requirements
  - Python 3.x
  - A [Nightscout Herokuapp](https://nightscout.github.io/vendors/heroku/new_user/)
